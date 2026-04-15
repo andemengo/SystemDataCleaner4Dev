@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+._*
+
+# Swift build artifacts
+.build/
+.swiftpm/
+
+# Compiled binary (not the .swift source)
+/SystemDataCleaner4Dev
+!/SystemDataCleaner4Dev.swift
+
+# IDE
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.idea/
+.vscode/
