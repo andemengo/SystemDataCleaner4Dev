@@ -4,7 +4,7 @@ Instructions for AI agents (Claude Code, Copilot, Cursor, etc.) working on this 
 
 ## Project Overview
 
-**SystemDataCleaner4Dev** is an interactive CLI tool that helps macOS/iOS developers reclaim disk space by cleaning up old Xcode simulator data — a major contributor to the "System Data" storage category.
+**SystemDataCleaner4Dev** is an interactive CLI tool that helps macOS/iOS developers reclaim disk space by cleaning up old Xcode simulator data, orphaned simulators, device support files and simulator runtimes — major contributors to the "System Data" storage category. Every item shows its real size on disk.
 
 - **Language:** Swift (script mode, `#!/usr/bin/env swift`)
 - **Dependencies:** None (Foundation only)
@@ -22,21 +22,27 @@ This is intentionally a single `.swift` file. Do NOT split it into multiple file
 The file is organized top-to-bottom in dependency order:
 
 1. **Errors** — `CleanerError` enum
-2. **Models** — Value types: `SimctlOutput`, `SimDevice`, `RuntimeGroup`, `DeviceEntry`, `CleanupPlan`, `DeletionResult`, `CleanupResult`
-3. **Protocols** — Abstractions: `CommandExecuting`, `UserInteracting`, `SimulatorLoading`, `SimulatorDeleting`
+2. **Models** — Value types: `SimctlOutput`, `SimDevice`, `SimRuntimeImage`, `RuntimeGroup`, `DeviceEntry`, `CleanupPlan`, `DeletionResult`, `CleanupResult`, `TargetCategory`, `TargetAction`, `CleanupTarget`, `ScanReport`, `TargetRemoval`, `ExtraCleanupResult`
+3. **Protocols** — Abstractions: `CommandExecuting`, `UserInteracting`, `SimulatorLoading`, `SimulatorDeleting`, `SizeMeasuring`, `DiskSpaceReading`, `TargetScanning`, `TargetRemoving`
 4. **Terminal Colors** — `Color` enum and `styled()` helper
-5. **ShellExecutor** — `CommandExecuting` implementation (runs shell commands)
-6. **ConsoleInput** — `UserInteracting` implementation (reads user input)
-7. **RuntimeParser** — Parses simulator runtime keys into platform + version
-8. **SimulatorLoader** — `SimulatorLoading` implementation (loads simulators via `xcrun simctl`)
-9. **SimulatorCleaner** — `SimulatorDeleting` implementation (deletes simulators)
-10. **Format Helpers** — `Format` enum for label/summary formatting
-11. **Presenter** — All terminal output (print statements live here, nowhere else)
-12. **CleanupPlanner** — Builds a `CleanupPlan` via interactive user selection
-13. **CleanupExecutor** — Executes the plan (deletes simulators, collects results)
-14. **App** — Orchestrates the full flow: load → plan → confirm → execute → report
-15. **CLI Flags** — `--version` and `--help` handlers
-16. **Composition Root** — Wires all dependencies and calls `App.run()`
+5. **Paths** — `Paths` enum (all `~/Library/Developer` locations) and `String.shellQuoted`
+6. **ShellExecutor** — `CommandExecuting` implementation (runs shell commands; drains the pipe before waiting to avoid deadlocks on large output)
+7. **Disk Usage** — `DiskUsageMeasurer` (`du -sk`) and `VolumeSpaceReader` (free space on the volume)
+8. **ConsoleInput** — `UserInteracting` implementation (reads user input)
+9. **RuntimeParser** — Parses simulator runtime keys into platform + version
+10. **Simctl** — Shared `xcrun simctl` JSON loaders (devices, runtime images)
+11. **SimulatorLoader** — `SimulatorLoading` implementation (available simulators + measured sizes)
+12. **SimulatorCleaner** — `SimulatorDeleting` implementation (deletes simulators)
+13. **Extra Cleanup Scanners** — `TargetScanning` implementations: `OrphanedSimulatorScanner`, `DeviceSupportScanner`, `RuntimeImageScanner`, `DeviceMountScanner` (info note only), `CompositeScanner`
+14. **TargetRemover** — `TargetRemoving` implementation (dispatches on `TargetAction`; directory removal is restricted to `~/Library/Developer`)
+15. **Format Helpers** — `Format` enum for label/summary/size formatting
+16. **Presenter** — All terminal output (print statements live here, nowhere else)
+17. **CleanupPlanner** — Builds a `CleanupPlan` via interactive user selection (choose what to KEEP)
+18. **CleanupExecutor** — Executes the plan (deletes simulators, collects results)
+19. **ExtraCleanupPlanner / ExtraCleanupExecutor** — Opt-in selection (choose what to DELETE) and removal of extra targets
+20. **App** — Orchestrates: simulators (load → plan → confirm → execute) → extras (scan → select → confirm → remove) → disk space report
+21. **CLI Flags** — `--version` and `--help` handlers
+22. **Composition Root** — Wires all dependencies and calls `App.run()`
 
 ### Composition Root Pattern
 
@@ -72,7 +78,7 @@ This codebase contains **zero `if` statements**. This is a deliberate design cho
 - **Single Responsibility:** Each type does one thing. `Presenter` prints. `CleanupPlanner` builds plans. `SimulatorLoader` loads data.
 - **Open/Closed:** Add new platforms by extending `RuntimeParser.knownPlatforms`. Add new output by adding methods to `Presenter`.
 - **Liskov Substitution:** All protocol conformances are fully substitutable.
-- **Interface Segregation:** Four focused protocols instead of one large one.
+- **Interface Segregation:** Small focused protocols instead of one large one.
 - **Dependency Inversion:** `App` depends on `SimulatorLoading`, `UserInteracting`, `SimulatorDeleting` — never on concrete types.
 
 ### Immutability
@@ -117,6 +123,12 @@ static func printMyNewThing(_ value: SomeType) {
 ### Supporting a new simulator platform
 
 Add the platform name to `RuntimeParser.knownPlatforms`. The parser handles the rest automatically.
+
+### Adding a new extra cleanup target
+
+1. Create a struct conforming to `TargetScanning` that returns `CleanupTarget`s (measure sizes via `SizeMeasuring`)
+2. Add a `TargetCategory` case if needed, and a `TargetAction` case + handling in `TargetRemover` if the removal is new
+3. Register the scanner in the `CompositeScanner` in the composition root
 
 ### Adding a new deletion strategy
 
